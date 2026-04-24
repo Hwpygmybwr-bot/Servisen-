@@ -1,0 +1,211 @@
+// ServiSen – Schéma base de données
+// Prisma ORM + PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// CLIENTS
+// ─────────────────────────────────────────
+model Client {
+  id            String    @id @default(uuid())
+  telephone     String    @unique
+  nom           String
+  prenom        String
+  region        String
+  ville         String?
+  quartier      String?
+  abonne        Boolean   @default(false)        // true après paiement Wave 1000F
+  dateAbonnement DateTime?
+  fcmToken      String?                          // token Firebase pour push notifs
+  bloque        Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  missions      Mission[]
+  otpSessions   OtpSession[]
+
+  @@map("clients")
+}
+
+// ─────────────────────────────────────────
+// PRESTATAIRES
+// ─────────────────────────────────────────
+model Prestataire {
+  id              String          @id @default(uuid())
+  telephone       String          @unique
+  nom             String
+  typeCompte      TypeCompte      @default(INDIVIDUEL)  // INDIVIDUEL | ENTREPRISE
+  metier          String
+  description     String?
+  region          String
+  ville           String?
+  quartier        String?
+  photo           String?                               // URL photo profil
+  cniRecto        String?                               // URL fichier CNI
+  cniVerso        String?
+  certificat      String?
+  noteAverage     Float           @default(0)
+  totalMissions   Int             @default(0)
+  disponible      Boolean         @default(true)
+  actif           Boolean         @default(false)       // activé après paiement initial
+  bloque          Boolean         @default(false)
+  fcmToken        String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  missions        Mission[]
+  mensualites     Mensualite[]
+  paiements       Paiement[]
+  otpSessions     OtpSession[]
+
+  @@map("prestataires")
+}
+
+enum TypeCompte {
+  INDIVIDUEL
+  ENTREPRISE
+}
+
+// ─────────────────────────────────────────
+// MISSIONS
+// ─────────────────────────────────────────
+model Mission {
+  id              String          @id @default(uuid())
+  clientId        String
+  prestataireId   String
+  description     String
+  photoUrl        String?
+  statut          StatutMission   @default(EN_ATTENTE)
+  refusRaison     String?
+  createdAt       DateTime        @default(now())
+  acceptedAt      DateTime?
+  refusedAt       DateTime?
+  completedAt     DateTime?
+  updatedAt       DateTime        @updatedAt
+
+  client          Client          @relation(fields: [clientId], references: [id])
+  prestataire     Prestataire     @relation(fields: [prestataireId], references: [id])
+  avis            Avis?
+
+  @@map("missions")
+}
+
+enum StatutMission {
+  EN_ATTENTE
+  ACCEPTEE
+  REFUSEE
+  EXPIREE
+  COMPLETEE
+}
+
+// ─────────────────────────────────────────
+// PAIEMENTS
+// ─────────────────────────────────────────
+model Paiement {
+  id              String          @id @default(uuid())
+  waveSessionId   String          @unique   // ID session Wave Checkout
+  wavePaymentId   String?                   // ID paiement Wave (après succès)
+  montant         Int                       // en FCFA (centimes non utilisés)
+  devise          String          @default("XOF")
+  typePaiement    TypePaiement
+  statut          StatutPaiement  @default(EN_ATTENTE)
+  clientId        String?
+  prestataireId   String?
+  mensualiteId    String?         @unique
+  webhookRecu     Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  prestataire     Prestataire?    @relation(fields: [prestataireId], references: [id])
+  mensualite      Mensualite?     @relation(fields: [mensualiteId], references: [id])
+
+  @@map("paiements")
+}
+
+enum TypePaiement {
+  ABONNEMENT_CLIENT       // 1 000 FCFA
+  INSCRIPTION_PRESTATAIRE // 2 000 ou 4 000 FCFA
+  MENSUALITE_PRESTATAIRE  // 500 ou 2 500 FCFA
+}
+
+enum StatutPaiement {
+  EN_ATTENTE
+  SUCCES
+  ECHEC
+  ANNULE
+}
+
+// ─────────────────────────────────────────
+// MENSUALITÉS
+// ─────────────────────────────────────────
+model Mensualite {
+  id              String          @id @default(uuid())
+  prestataireId   String
+  mois            Int             // 1-12
+  annee           Int
+  nbMissions      Int             @default(0)
+  montantDu       Int             // 500 ou 2500
+  payee           Boolean         @default(false)
+  datePaiement    DateTime?
+  createdAt       DateTime        @default(now())
+
+  prestataire     Prestataire     @relation(fields: [prestataireId], references: [id])
+  paiement        Paiement?
+
+  @@unique([prestataireId, mois, annee])
+  @@map("mensualites")
+}
+
+// ─────────────────────────────────────────
+// AVIS
+// ─────────────────────────────────────────
+model Avis {
+  id              String   @id @default(uuid())
+  missionId       String   @unique
+  note            Int      // 1-5
+  commentaire     String?
+  createdAt       DateTime @default(now())
+
+  mission         Mission  @relation(fields: [missionId], references: [id])
+
+  @@map("avis")
+}
+
+// ─────────────────────────────────────────
+// OTP SESSIONS
+// ─────────────────────────────────────────
+model OtpSession {
+  id              String   @id @default(uuid())
+  telephone       String
+  code            String   // code à 6 chiffres hashé
+  typeUtilisateur String   // "CLIENT" | "PRESTATAIRE"
+  verifie         Boolean  @default(false)
+  expiresAt       DateTime
+  clientId        String?
+  prestataireId   String?
+  createdAt       DateTime @default(now())
+
+  client          Client?      @relation(fields: [clientId], references: [id])
+  prestataire     Prestataire? @relation(fields: [prestataireId], references: [id])
+
+  @@map("otp_sessions")
+}
+
+// ─────────────────────────────────────────
+// PARAMÈTRES ADMIN
+// ─────────────────────────────────────────
+model Parametre {
+  id      String @id @default(uuid())
+  cle     String @unique
+  valeur  String
+  label   String?
+
+  @@map("parametres")
+}
